@@ -17,7 +17,7 @@ use Scalar::Util 'refaddr';
 
 use Tree::DAG_Node;
 
-our $VERSION = '1.01';
+our $VERSION = '1.03';
 
 # -----------------------------------------------
 
@@ -52,14 +52,19 @@ sub new
 
 sub read
 {
-	my($self)       = @_;
-	my($table_name) = $self -> table_name;
-	my($sql)        =
+	my($self, $extra) = @_;
+	my($table_name)   = $self -> table_name;
+	my($sql)          =
 		"select * from $table_name where " .
 		$self -> context_col .
 		' = ? order by ' .
 		$self -> unique_id_col;
 	my($record) = $self -> dbh -> selectall_arrayref($sql, {Slice => {} }, $self -> context);
+
+	if (! $extra)
+	{
+		$extra = [];
+	}
 
 	my($id);
 	my($mother_id);
@@ -69,11 +74,12 @@ sub read
 
 	for $row (@$record)
 	{
-		$id                       = $$row{$self -> id_col};
-		$mother_id                = $$row{$self -> mother_id_col};
-		$node                     = Tree::DAG_Node -> new();
-		$seen{$id}                = $node;
-		${$node -> attribute}{id} = $id;
+		$id                        = $$row{$self -> id_col};
+		$mother_id                 = $$row{$self -> mother_id_col};
+		$node                      = Tree::DAG_Node -> new();
+		$seen{$id}                 = $node;
+		${$node -> attributes}{id} = $id;
+		${$node -> attributes}{$_} = $$row{$_} for @$extra;
 
 		$node -> name($$row{$self -> name_col});
 
@@ -102,19 +108,15 @@ sub write_node
 	my($mother)  = $node -> mother;
 	my($mum_ref) = $mother ? refaddr $mother : 0;
 	my($mum_id)  = $$opt{id}{$mum_ref} || 0;
-	my($sql)     =
-		"insert into $$opt{table_name} (" .
-		$$opt{self} -> mother_id_col .
-		', ' .
-		$$opt{self} -> unique_id_col .
-		', ' .
-		$$opt{self} -> context_col .
-		', ' .
-		$$opt{self} -> name_col .
-		') values (?, ?, ?, ?)';
-	my($sth) = $$opt{dbh} -> prepare_cached($sql);
 
-	$sth -> execute($mum_id, $$opt{unique_id}, $$opt{context}, $node -> name);
+	$$opt{sth} -> execute
+		(
+		 $mum_id,
+		 $$opt{unique_id},
+		 $$opt{context},
+		 $node -> name,
+		 map{${$node -> attributes}{$_} } @{$$opt{extra} },
+		);
 
 	my($id)             = $$opt{dbh} -> last_insert_id(undef, undef, $$opt{table_name}, undef);
 	my($refaddr)        = refaddr $node;
@@ -128,12 +130,35 @@ sub write_node
 
 sub write
 {
-	my($self, $tree) = @_;
-	my($table_name)  = $self -> table_name;
-	my($sql)         = "delete from $table_name where " . $self -> context_col . ' = ?';
-	my($sth)         = $self -> dbh -> prepare_cached($sql);
+	my($self, $tree, $extra) = @_;
+	my($table_name) = $self -> table_name;
+	my($sql)        = "delete from $table_name where " . $self -> context_col . ' = ?';
+	my($sth)        = $self -> dbh -> prepare_cached($sql);
 
 	$sth -> execute($self -> context);
+
+	$sql = "insert into $table_name (" .
+		$self -> mother_id_col .
+		', ' .
+		$self -> unique_id_col .
+		', ' .
+		$self -> context_col .
+		', ' .
+		$self -> name_col;
+
+	if ($extra && @$extra)
+	{
+		$sql .= ', ' . join(', ', @$extra);
+	}
+
+	$sql .= ') values (?, ?, ?, ?';
+	
+	if ($extra && @$extra)
+	{
+		$sql .= ', ?' x @$extra;
+	}
+
+	$sql .= ')';
 
 	$tree -> walk_down
 		({
@@ -141,8 +166,10 @@ sub write
 			context    => $self -> context,
 			dbh        => $self -> dbh,
 			_depth     => 0,
+			extra      => $extra || [],
 			id         => {},
 			self       => $self,
+			sth        => $self -> dbh -> prepare_cached($sql),
 			table_name => $self -> table_name,
 			unique_id  => 0,
 		 });
@@ -183,7 +210,7 @@ L<Tree::DAG_Node::Persist> - Persist multiple trees in a single database table, 
 
 	my($offshoot) = Tree::DAG_Node::Persist -> new
 	(
-	 context => 'Offshoot', # Don't use Master or it'll overwrite $tree.
+	 context => 'Offshoot', # Don't use Master or it'll overwrite $tree in the db.
 	 dbh     => $dbh,
 	);
 
@@ -335,19 +362,49 @@ Get or set the value to be used as the name of the table when the tree is writte
 
 Get or set the value to be used as the name of the 'unique_id' column when the tree is written to or read from the database.
 
-=head1 Method: read()
+=head1 Method: read([$extra])
 
 Returns a tree of type L<Tree::DAG_Node> read from the database.
 
-This method does not take any parameters.
+If the optional parameter $extra is provided, then it is assumed to be an arrayref of field names.
+
+C<read($extra)> is used in conjunction with C<write($tree, $extra)>. See that method for more details.
+
+This code shows how to save and restore an attribute of each node called 'page_id'.
+
+Note: In this code, the [] indicate an arrayref, not optional parameters.
+
+	$object -> write($tree, ['page_id']);
+
+	$shrub = $object -> read(['page_id']);
+
+The test program t/test.t demonstrates usage of this feature.
 
 =head1 Method: write_node($node, {...})
 
 This method is called by write(), and - naturally - you'll never call it directly.
 
-=head1 Method: write($tree)
+=head1 Method: write($tree[, $extra])
 
 Writes a tree of type L<Tree:DAG_Node> to the database.
+
+If the optional parameter $extra is provided, then it is assumed to be an arrayref of field names:
+
+=over 4
+
+=item o Each field's name is the name of a column in the table
+
+=item o Each field's value is extracted from the attributes of the node, via the field's name
+
+=item o The (field name => field value) pairs are written to each record in the table
+
+=back
+
+In particular note that you can store - in a single table - trees which both do and don't have extra fields.
+
+Just ensure the definition of each extra column is flexible enough to handle these alternatives.
+ 
+The test program t/test.t demonstrates usage of this feature.
 
 This method does not return a meaningful value.
 
