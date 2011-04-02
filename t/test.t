@@ -1,16 +1,14 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
-use common::sense;
-
-use DBI;
-
-use DBIx::Admin::CreateTable;
+use strict;
+use warnings;
 
 use File::Temp;
 
-use Test::More tests => 23;
+use Test::More tests => 20;
 
 use Tree::DAG_Node;
+use Tree::DAG_Node::Persist::Create;
 
 # -----------------------------------------------
 
@@ -109,7 +107,7 @@ sub find_page_id
 	my($node, $opt) = @_;
 	my($result)     = 1;
 
-	if (${$node -> attributes}{page_id} == $$opt{page_id})
+	if (${$node -> attributes}{page_id} && (${$node -> attributes}{page_id} == $$opt{page_id}) )
 	{
 		$$opt{node} = $node;
 		$result     = 0; # Short-circuit walking the tree.
@@ -152,46 +150,26 @@ sub read_data
 
 # --------------------------------------------------
 
-my($temp_file_handle, $temp_file_name) = File::Temp::tempfile('temp.XXXX', EXLOCK => 0, UNLINK => 1);
-my(@dsn)                               =
-(
-$ENV{DBI_DSN}  || "dbi:SQLite:$temp_file_name",
-$ENV{DBI_USER} || '',
-$ENV{DBI_PASS} || '',
-);
-my($dbh) = DBI -> connect(@dsn, {RaiseError => 1, PrintError => 1, AutoCommit => 1});
+if (! $ENV{DBI_DSN})
+{
+	my($temp_file_handle, $temp_file_name) = File::Temp::tempfile('temp.XXXX', EXLOCK => 0, UNLINK => 1);
+
+	$ENV{DBI_DSN} = "dbi:SQLite:dbname=$temp_file_name";
+}
+
+my($extra)      = ['page_id'];
+my($table_name) = 'menus';
+my($creator)    = Tree::DAG_Node::Persist::Create -> new(extra_columns => "$$extra[0]:integer:default:0", table_name => $table_name);
+my($dbh)        = $creator -> connect;
 
 ok($dbh, 'Created $dbh');
 
-my($creator) = DBIx::Admin::CreateTable -> new(dbh => $dbh, verbose => 0);
+diag "\nDropping table '$table_name', which may not exist. Don't panic if you get 1 or 2 error messages";
+diag "One message will be for a missing table, and the other for a missing sequence";
 
-ok($creator, 'Created $creator');
+my($result) = $creator -> drop_create;
 
-my($table_name) = 'menus';
-
-diag "Dropping table $table_name, which may not exist";
-
-$creator -> drop_table($table_name);
-
-ok(1, "Dropped table '$table_name' if it existed");
-
-my($primary_key) = $creator -> generate_primary_key_sql($table_name);
-
-ok($primary_key, "Generated primary key syntax for $ENV{DBI_DSN}");
-
-my($result) = $creator -> create_table(<<SQL);
-create table $table_name
-(
-id $primary_key,
-mother_id integer not null,
-page_id integer default 0,
-unique_id integer not null,
-context varchar(255) not null,
-name varchar(255) not null
-)
-SQL
-
-ok(1, "Created table '$table_name'");
+ok($result == 0, "Created table '$table_name'");
 
 my($context) = 'Master';
 my($master)  = Tree::DAG_Node::Persist -> new
@@ -215,8 +193,6 @@ ok($tree, 'Populated master tree');
 $tree -> walk_down({callback => \&pretty_print, _depth => 0});
 
 ok(1, 'Printed master tree');
-
-my($extra) = ['page_id'];
 
 $master -> write($tree, $extra);
 
@@ -242,7 +218,7 @@ $shrub -> walk_down($opt);
 ok($$opt{count} == 20, 'Found 20 nodes in the copy of the master tree read in from the database');
 
 my($target) = 'Beans and Nuts';
-$opt        = 
+$opt        =
 {
 	callback => \&find_node,
 	_depth   => 0,
@@ -320,7 +296,7 @@ $bush -> walk_down($opt);
 
 ok($$opt{id} == 28, "Found node '$junk_food' at node 28 in the modified tree read in from the database");
 
-$opt = 
+$opt =
 {
 	callback => \&find_node,
 	_depth   => 0,
@@ -338,7 +314,7 @@ for my $kid ($$opt{node} -> daughters)
 }
 
 $target = 1011; # Beverages.
-$opt    = 
+$opt    =
 {
 	callback => \&find_page_id,
 	_depth   => 0,
