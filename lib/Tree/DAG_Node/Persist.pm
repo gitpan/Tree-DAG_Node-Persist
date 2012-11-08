@@ -18,7 +18,7 @@ use Scalar::Util 'refaddr';
 
 use Tree::DAG_Node;
 
-our $VERSION = '1.05';
+our $VERSION = '1.06';
 
 # -----------------------------------------------
 
@@ -185,7 +185,7 @@ sub write
 
 =head1 NAME
 
-L<Tree::DAG_Node::Persist> - Persist multiple trees in a single database table, preserving child order
+Tree::DAG_Node::Persist - Persist multiple trees in a single db table, preserving child order
 
 =head1 Synopsis
 

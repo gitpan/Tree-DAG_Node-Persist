@@ -4,7 +4,7 @@
       "Ron Savage <ron@savage.net.au>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.110580",
+   "generated_by" : "Module::Build version 0.4003, CPAN::Meta::Converter version 2.120630",
    "license" : [
       "artistic_1"
    ],
@@ -33,25 +33,27 @@
             "File::Temp" : "0.22",
             "Hash::FieldHash" : "0.1",
             "Scalar::Util" : "1.23",
-            "Tree::DAG_Node" : "1.06"
+            "Tree::DAG_Node" : "1.06",
+            "strict" : "0",
+            "warnings" : "0"
          }
       }
    },
    "provides" : {
       "Tree::DAG_Node::Persist" : {
          "file" : "lib/Tree/DAG_Node/Persist.pm",
-         "version" : "1.05"
+         "version" : "1.06"
       },
       "Tree::DAG_Node::Persist::Create" : {
          "file" : "lib/Tree/DAG_Node/Persist/Create.pm",
-         "version" : "1.05"
+         "version" : "1.06"
       }
    },
    "release_status" : "stable",
    "resources" : {
       "license" : [
-         "http://opensource.org/licenses/artistic-license.php"
+         "http://www.perlfoundation.org/artistic_license_1_0"
       ]
    },
-   "version" : "1.05"
+   "version" : "1.06"
 }
